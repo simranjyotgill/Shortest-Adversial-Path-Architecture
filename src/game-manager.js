@@ -1,8 +1,12 @@
 var gameData = require('./game-data-manager');
+var DB = require('./db');
 module.exports = new GameManager();
 
 function GameManager() {
   this.gameData = gameData;
+  this.db = new DB();
+  this.playerName = 'Player';
+  this.adversaryName = 'Adversary';
 }
 
 GameManager.prototype.initializeGame = function(data) {
@@ -60,19 +64,35 @@ GameManager.prototype.validateMove = function (data, player) {
   if (data.length === 0) {
     return false;
   }
-  
+
   if (player === 1) {
-    return this.gameData.validateMove(data)
+    return this.gameData.validateMove(this.playerName, data)
   } else {
     if (data.length !== 2) {
       return false;
     }
-    return this.gameData.validateMove(data[0], data[1]);
+    return this.gameData.validateMove(this.adversaryName, data[0], data[1]);
   }
 };
 
 GameManager.prototype.notifyEndGame = function (connHandler) {
-  this.gameData.showFinalCost();
+  this.gameData.showFinalCost({
+    db: this.db,
+    player: this.playerName,
+    adversary: this.adversaryName
+  });
+
+  this.db.incrementTeamScoreBasedOnMatch(this.playerName, this.adversaryName);
+
   this.gameData.reset();
   connHandler.notifyGameEnd();
 };
+
+GameManager.prototype.insertMatch = function (playerName, adversaryName) {
+  this.playerName = playerName;
+  this.adversaryName = adversaryName;
+  var db = this.db;
+  db.insertTeam(playerName);
+  db.insertTeam(adversaryName);
+  db.insertMatch(playerName, adversaryName);
+}

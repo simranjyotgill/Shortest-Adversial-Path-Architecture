@@ -14,3 +14,7 @@ net.createServer(function (sock) {
 
 console.log('Server started');
 console.log('Waiting for player');
+
+connectionHandler.driverSock.init(function(data) {
+  connectionHandler.startDriverListen.call(connectionHandler, gameManager);
+});

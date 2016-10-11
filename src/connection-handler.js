@@ -1,4 +1,5 @@
 var Timer = require('./timer');
+var DriverConnectionHandler = require('./driver-connection-handler');
 const chalk = require('chalk');
 
 module.exports = new ConnectionHandler();
@@ -13,7 +14,9 @@ function ConnectionHandler() {
     this.playerTwoActive = false;
     this.playerOneTurn = false;
     this.playerTwoTurn = false;
-    this.timer;
+    this.driverSock = new DriverConnectionHandler();
+    this.timer = new Timer();
+    this.db;
 };
 
 ConnectionHandler.prototype.handleConnections = function (sock, cb) {
@@ -37,14 +40,34 @@ ConnectionHandler.prototype.handleConnections = function (sock, cb) {
   return;
 };
 
+ConnectionHandler.prototype.setName = function (data, gameManager) {
+  data = data.split(' ').map(function (x) {
+    return x.trim();
+  })
+
+  this.playerOneName = data[0];
+  this.playerTwoName = data[1];
+  this.timer.setPlayerOneName(data[0]);
+  this.timer.setPlayerTwoName(data[1]);
+  this.db = gameManager.db;
+
+  gameManager.insertMatch(data[0], data[1]);
+}
+
 ConnectionHandler.prototype.sendFile = function(data) {
   this.playerOneSock.write(data + '#\n');
   this.playerTwoSock.write(data + '#\n');
 };
 
+ConnectionHandler.prototype.startDriverListen = function(gameManager) {
+  var self = this;
+  self.driverSock.listen(function (data) {
+    self.setName(data, gameManager);
+  });
+}
+
 ConnectionHandler.prototype.startConversation = function(gameManager) {
   var self = this;
-  this.timer = new Timer();
 
   this.timer.startCounting(this, 1);
 
@@ -52,7 +75,7 @@ ConnectionHandler.prototype.startConversation = function(gameManager) {
     if (!self.playerOneTurn) {
       return;
     }
-
+    console.log(data.toString());
     self.timer.clearPlayerTimeout(1);
 
     var hasEnded = false;
@@ -70,6 +93,10 @@ ConnectionHandler.prototype.startConversation = function(gameManager) {
       self.endConnections();
     }
 
+  });
+
+  this.playerOneSock.on('error', function (exc) {
+    console.log('Player one exception ignored', exc);
   })
 
   this.playerTwoSock.on('data', function(data) {
@@ -77,6 +104,7 @@ ConnectionHandler.prototype.startConversation = function(gameManager) {
       return;
     }
 
+    console.log(data.toString());
     self.timer.clearPlayerTimeout(2);
 
     try {
@@ -88,14 +116,26 @@ ConnectionHandler.prototype.startConversation = function(gameManager) {
     self.playerTwoTurn = false;
     self.playerOneTurn = true;
   });
+
+  this.playerTwoSock.on('error', function (exc) {
+    console.log('Player two Exception ignored', exc);
+  })
 };
 
 ConnectionHandler.prototype.notifyPlayerOne = function(data) {
+  if (!this.playerOneSock) {
+    return;
+  }
+
   this.playerOneSock.write(data);
   this.timer.startCounting(this, 1);
 };
 
 ConnectionHandler.prototype.notifyPlayerTwo = function(data) {
+  if (!this.playerTwoSock) {
+    return;
+  }
+
   this.playerTwoSock.write(data);
   this.timer.startCounting(this, 2);
 };
@@ -118,15 +158,20 @@ ConnectionHandler.prototype.reset = function () {
   this.playerTwoActive = false;
   this.gameActive = false;
   this.timer.clear();
+  this.timer.playerOneTimer = 0;
+  this.timer.playerTwoName = 0;
   this.timer = new Timer();
   console.log('Waiting for player');
+  this.driverSock.write('start');
 };
 
 ConnectionHandler.prototype.endGameTimeout = function(num) {
   if (num === 1) {
-    console.log(chalk.red('Player timed out'));
+    console.log(chalk.red(this.playerOneName, 'timed out'));
+    this.db.incrementTeamScore(this.playerTwoName);
   } else {
-    console.log(chalk.red('Adversary timed out'));
+    console.log(chalk.red(this.playerTwoName, 'timed out'));
+    this.db.incrementTeamScore(this.playerOneName);
   }
 
   this.notifyGameEnd();
